@@ -20,5 +20,44 @@ from ..common import ERROR, WARN  # noqa: F401
 
 
 def decide(issues, image_stems, cfg, reviewed=frozenset()):
-    # TODO
-    raise NotImplementedError("gate chưa làm")
+    gate_cfg = cfg.get("gate", {})
+    warn_ratio_hold = gate_cfg.get("warn_ratio_hold", 0.10)
+    # 1. Đếm lỗi bắt buộc (ERROR) - Không bao giờ được bỏ qua
+    errors = [i for i in issues if i.severity == ERROR]
+    n_errors = len(errors)
+    # 2. Đếm số ẢNH khác nhau có cảnh báo (WARN) chưa được duyệt
+    valid_stems = set(image_stems)
+    reviewed_set = set(reviewed)
+    warn_images = {
+        i.image
+        for i in issues
+        if i.severity == WARN and i.image in valid_stems and i.image not in reviewed_set
+    }
+    n_warn_images = len(warn_images)
+    n_images = len(image_stems)
+    # 3. Tính tỉ lệ thô (raw) để so sánh ngưỡng - chống lỗi làm tròn sớm (premature rounding)
+    raw_ratio = (n_warn_images / n_images) if n_images > 0 else 0.0
+    # 4. Ra quyết định theo cây quyết định bằng raw_ratio
+    reasons: list[str] = []
+    if n_errors > 0:
+        decision = "Rework"
+        reasons.append(f"Còn {n_errors} lỗi bắt buộc (severity ERROR)")
+    elif raw_ratio >= warn_ratio_hold:
+        decision = "Hold"
+        reasons.append(
+            f"Tỉ lệ ảnh có cảnh báo {raw_ratio:.2%} >= ngưỡng {warn_ratio_hold:.2%} ({n_warn_images}/{n_images} ảnh)"
+        )
+    else:
+        decision = "Release"
+        reasons.append(
+            f"Đạt chuẩn: 0 lỗi bắt buộc, tỉ lệ cảnh báo {raw_ratio:.2%} < {warn_ratio_hold:.2%}"
+        )
+    # 5. Chỉ làm tròn khi trả về kết quả
+    return {
+        "decision": decision,
+        "n_errors": n_errors,
+        "n_warn_images": n_warn_images,
+        "n_images": n_images,
+        "warn_ratio": round(raw_ratio, 4),
+        "reasons": reasons,
+    }
