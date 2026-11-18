@@ -85,7 +85,17 @@ python -m pipeline.run --budget 0 --reports work/rep_nb --export-dir work/exp_nb
 
 ## 5. Train: raw vs clean (tùy chọn, chấm riêng)
 
-Chưa chạy (Môi trường làm việc cục bộ là máy Windows không trang bị GPU; phần huấn luyện đối chứng mô hình YOLOv26n trên 20 epoch và 2 seed được chấm riêng 15 điểm và sẽ được thực hiện trên Google Colab theo đúng hướng dẫn tại `docs/COLAB.md`).
+Bốn lượt train YOLO26n dùng cùng seed 0 và 1, 20 epoch, batch 16, imgsz 640 và CPU. Raw có 224 ảnh đầu vào, trong đó Ultralytics loại 11 ảnh khi quét. Clean dùng đủ 193 ảnh.
+
+
+| biến thể | #ảnh train | số seed | map50 (TB ± độ lệch) | map50_95 (TB ± độ lệch) | precision (TB ± độ lệch) | recall (TB ± độ lệch) |
+|---|---|---|---|---|---|---|
+| raw | 224 | 2 | 0.713 ± 0.011 | 0.508 ± 0.018 | 0.714 ± 0.046 | 0.666 ± 0.040 |
+| clean | 193 | 2 | 0.727 ± 0.012 | 0.502 ± 0.017 | 0.813 ± 0.029 | 0.609 ± 0.018 |
+
+Chênh mAP50 (clean − raw) = **+0.015**.
+
+Hai seed đều tăng mAP50 (+0,0139 và +0,0155), cùng cỡ độ dao động giữa seed. Precision tăng nhưng recall và mAP50–95 giảm. Car có mức tăng AP50 trung bình lớn nhất (+0,0282), chủ yếu đến từ seed 1. Để phân biệt ảnh hưởng của 11 ảnh nghi trùng test với thay đổi nhãn, cần train đối chứng chỉ bỏ ảnh trùng và kiểm lại nhãn car trên các ảnh đã duyệt. Số liệu và cách kiểm được trình bày trong [phân tích kết quả](results/ANALYSIS.md).
 
 ---
 
