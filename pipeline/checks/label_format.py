@@ -25,5 +25,99 @@ from ..common import ERROR, WARN, Issue, iou_xywh, parse_yolo_line  # noqa: F401
 
 
 def run(ds, cfg):
-    # TODO: duyệt từng file nhãn, từng dòng
-    raise NotImplementedError("check label_format chưa làm")
+    issues = []
+    #BAD_FORMAT 
+    for path in ds.label_files():
+        stem = path.stem  # "a.txt" -> "a"
+        valid_boxes = []
+        for line_no, text in ds.read_label_lines(stem) or []:
+            try:
+                class_id, cx, cy, w, h = parse_yolo_line(text)
+            except ValueError as err:
+                issues.append(
+                    Issue("label_format", ERROR, "BAD_FORMAT", stem, str(err), line=line_no)
+                )
+                continue
+
+            #2 BAD_CLASS_ID 
+            if class_id < 0 or class_id >= len(ds.classes):
+                issues.append(
+                    Issue("label_format", ERROR, "BAD_CLASS_ID", stem, f"ID lớp ngoài dải: {class_id}", line=line_no)
+                )
+                continue 
+            # 3. Kiểm tra box rỗng/kích thước <= 0 BOX_ZERO   
+            if w <= 0 or h <= 0:
+                issues.append(
+                    Issue("label_format", ERROR, "BOX_ZERO", stem, f"Box kích thước <= 0 (w={w}, h={h})", line=line_no)
+                )
+                continue 
+            # 4. Kiểm tra box tràn ảnh (BOX_OUT_OF_IMAGE)
+            overflow_tol = cfg.get("label_format", {}).get("overflow_tol", 0.001)
+            x1, y1 = cx - w / 2.0, cy - h / 2.0
+            x2, y2 = cx + w / 2.0, cy + h / 2.0
+            overflow = max(0.0, -x1, -y1, x2 - 1.0, y2 - 1.0)
+
+            if overflow > overflow_tol:
+                issues.append(
+                    Issue(
+                        "label_format",
+                        ERROR,
+                        "BOX_OUT_OF_IMAGE",
+                        stem,
+                        f"Box tràn ảnh {overflow:.4f} > {overflow_tol}",
+                        line=line_no,
+                        extra={"overflow": overflow},
+                    )
+                )
+            # 5. Kiểm tra trùng lặp box (DUP_BOX)
+            dup_box_iou = cfg.get("label_format", {}).get("dup_box_iou", 0.8)
+            current_geom = (cx, cy, w, h)
+            for prev_cls, prev_geom in valid_boxes:
+                if class_id == prev_cls:
+                    if iou_xywh(current_geom, prev_geom) > dup_box_iou:
+                        issues.append(
+                            Issue(
+                                "label_format",
+                                ERROR,
+                                "DUP_BOX",
+                                stem,
+                                f"Trùng box với dòng trước (IoU > {dup_box_iou})",
+                                line=line_no,
+                            )
+                        )
+                        break
+
+            # Lưu box hiện tại vào danh sách để so sánh với các dòng tiếp theo
+            valid_boxes.append((class_id, current_geom))
+            # 6. Cảnh báo box quá nhỏ (BOX_TINY)
+            min_box_px = cfg.get("label_format", {}).get("min_box_px", 12)
+            im_size = ds.image_size(stem)
+            if im_size:
+                im_w, im_h = im_size
+                short_edge_px = min(w * im_w, h * im_h)
+                if short_edge_px < min_box_px:
+                    issues.append(
+                        Issue(
+                            "label_format",
+                            WARN,
+                            "BOX_TINY",
+                            stem,
+                            f"Box quá nhỏ ({short_edge_px:.1f}px < {min_box_px}px)",
+                            line=line_no,
+                        )
+                    )
+
+            # 7. Cảnh báo box quá to (BOX_HUGE)
+            max_box_frac = cfg.get("label_format", {}).get("max_box_frac", 0.85)
+            if w * h > max_box_frac:
+                issues.append(
+                    Issue(
+                        "label_format",
+                        WARN,
+                        "BOX_HUGE",
+                        stem,
+                        f"Box chiếm diện tích {w * h:.3f} > {max_box_frac}",
+                        line=line_no,
+                    )
+                )
+    return issues
